@@ -1,29 +1,26 @@
 """
-Proj2_FermModel_TeamXX.py
+Proj2_FermModel_TeamXX_v2.py
 
-ENGR 16100 - Project 2: Ethanol Production Facility Computational Model
-Mass & Energy Balance, Fluid Mechanics, Capital Cost, and EROI Calculator.
+ENGR 16100 - Project 2: Ethanol Production Facility Computational Model (Version 2)
+Mass & Energy Balance, Fluid Mechanics, Site Selection, Capital Cost, EROI, and Financial ROI Calculator.
 
-This Python model supports engineering design teams in optimizing localized 
-biofuel production from agricultural corn waste.
-
-Key Features & Engineering Modeling:
-1. Universal Accounting Equation (UAE) Mass Balances:
-   - Fermenter: Conversions, ethanol generation (0.51 wt sugar), CO2 release (0.49 wt sugar).
-   - Filter: Insoluble fiber removal efficiency (eta_filt).
-   - Distiller: Concentrates ethanol exit stream (eta_dist).
-   - Dehydrator: Excess water removal efficiency (eta_dehy).
-2. Fluid Mechanics & Energy Losses:
-   - Weighted average fluid density calculations based on component mass fractions.
-   - Darcy-Weisbach friction head loss (H_DW) and fitting losses (bends, valves).
-   - Mechanical pump work and daily electrical energy consumption.
-3. Financial & Economic Analysis:
-   - Complete capital cost breakdown including Site acquisition, taxes, mold remediation,
-     unit operation equipment costs, pumps, piping, valves, and fittings.
-   - Energy Return on Investment (EROI = Usable Energy Out / Electrical Energy In).
+This updated Python model incorporates:
+1. Interactive User Input handling (CLI prompts for site selection, target production volume, 
+   equipment tiers, and economic parameters with clean batch fallback).
+2. Site-Specific Engineering Effects on Energy Return on Investment (EROI):
+   - Site 1: Two 2-story buildings (40 ft elevation lift, 30.5 m pipe length, 6 bends).
+   - Site 2: L-shaped warehouse (25 ft ledge lift, 36.6 m pipe length, 6 bends, $150k road cost).
+   - Site 3: 3-story tower (Gravity-assisted layout, 50 ft lift to fermenter, 18.3 m pipe length, 
+     4 bends, 10% real estate tax, $12k mold remediation).
+3. Comprehensive Financial ROI & Payback Modeling:
+   - Annual Revenue based on wholesale E100 price.
+   - Daily & Annual Electrical Operating Expenses (OpEx).
+   - Total Capital Cost (CapEx) breakdown (Site + Equipment + Piping + Fittings).
+   - Simple Annual Financial ROI (%) and Capital Payback Period (Years).
 """
 
 import math
+import sys
 
 # --- PHYSICAL CONSTANTS & CONVERSIONS ---
 G = 9.81  # m/s^2
@@ -41,7 +38,7 @@ RHO_WATER = 997.0
 
 # --- CATALOG DATA TABLES ---
 
-# Fermenters: efficiency (% sugar converted), electrical (kWh/day), capital cost ($ per m^3/s flow rate)
+# Fermenters
 FERMENTER_CATALOG = {
     "Scrap": {"eta": 0.50, "kwh_day": 46600.0, "cost_per_m3s": 320000.0},
     "Average": {"eta": 0.75, "kwh_day": 47200.0, "cost_per_m3s": 380000.0},
@@ -49,7 +46,7 @@ FERMENTER_CATALOG = {
     "World-class": {"eta": 0.95, "kwh_day": 48000.0, "cost_per_m3s": 1100000.0},
 }
 
-# Distillers: efficiency (% alcohol exit purity by weight), electrical (kWh/day), capital cost ($ per m^3/s flow rate)
+# Distillers
 DISTILLER_CATALOG = {
     "Scrap": {"eta": 0.81, "kwh_day": 47004.0, "cost_per_m3s": 390000.0},
     "Average": {"eta": 0.90, "kwh_day": 47812.0, "cost_per_m3s": 460000.0},
@@ -57,12 +54,21 @@ DISTILLER_CATALOG = {
     "World-class": {"eta": 0.98, "kwh_day": 49500.0, "cost_per_m3s": 1370000.0},
 }
 
-# Material Removal (Filters & Dehydrators): efficiency (% contaminant/water removed), electrical (kWh/day), capital cost ($ per m^3/s flow rate)
+# Material Removal (Filters & Dehydrators)
 MATERIAL_REMOVAL_CATALOG = {
     "Scrap": {"eta": 0.50, "kwh_day": 48800.0, "cost_per_m3s": 200000.0},
     "Average": {"eta": 0.75, "kwh_day": 49536.0, "cost_per_m3s": 240000.0},
     "Premium": {"eta": 0.90, "kwh_day": 50350.0, "cost_per_m3s": 280000.0},
     "World-class": {"eta": 0.98, "kwh_day": 51000.0, "cost_per_m3s": 480000.0},
+}
+
+# Pumps Catalog
+PUMP_CATALOG = {
+    "Cheap": {"eff": 0.80, "cost_per_m3s": 260000.0},
+    "Value": {"eff": 0.83, "cost_per_m3s": 310000.0},
+    "Standard": {"eff": 0.86, "cost_per_m3s": 380000.0},
+    "High-Grade": {"eff": 0.89, "cost_per_m3s": 460000.0},
+    "Premium": {"eff": 0.92, "cost_per_m3s": 552000.0},
 }
 
 # Pipe Friction Factors (f) and unit prices per meter for D = 0.10 m
@@ -75,25 +81,43 @@ PIPE_CATALOG_D010 = {
     "Glorious": {"f": 0.002, "cost_per_m": 2970.0},
 }
 
-# Site Survey Specs
+# Site Survey Specifications & Impact Metrics
 SITE_CATALOG = {
     "Site 1": {
         "purchase_cost": 1500000.0,
         "tax_rate": 0.0,
         "remediation_cost": 0.0,
-        "description": "Two 2-story buildings (2400 sqft total). Demolishes 10 low-income housing units.",
+        "infra_add_on_cost": 0.0,
+        "pump_lift_m": 12.2,       # 40 ft lift (2-story buildings)
+        "pipe_len_m": 30.5,        # 100 ft piping between 2 separate buildings
+        "num_bends": 6,            # 6 pipe bends
+        "layout_type": "Two 2-story buildings (2,400 sqft total)",
+        "social_impact": "Demolishes 10 low-income housing units (housing replacement required).",
+        "environmental_impact": "Low environmental disturbance; modern HVAC/electrical infrastructure.",
     },
     "Site 2": {
         "purchase_cost": 1300000.0,
         "tax_rate": 0.0,
         "remediation_cost": 0.0,
-        "description": "L-shaped warehouse (3300 sqft total). Requires 4-mile access road near state park.",
+        "infra_add_on_cost": 150000.0, # Estimated 4-mile access road construction cost
+        "pump_lift_m": 7.62,       # 25 ft lift (ledge height)
+        "pipe_len_m": 36.6,        # 120 ft piping around L-shaped warehouse
+        "num_bends": 6,            # 6 pipe bends
+        "layout_type": "L-shaped warehouse w/ ledge (3,300 sqft total)",
+        "social_impact": "Close to corn agribusiness supplier.",
+        "environmental_impact": "4-mile access road impacts state park wildlife.",
     },
     "Site 3": {
         "purchase_cost": 1600000.0,
-        "tax_rate": 0.10,  # 10% tax upfront
-        "remediation_cost": 12000.0,  # mold remediation cost
-        "description": "3-story tower (2300 sqft total). Vertical gravity flow. Job creation in low-income area.",
+        "tax_rate": 0.10,          # 10% real estate tax upfront
+        "remediation_cost": 12000.0, # Upper floor mold remediation
+        "infra_add_on_cost": 0.0,
+        "pump_lift_m": 15.24,      # 50 ft initial lift to Floor 3 fermenter (gravity cascade after)
+        "pipe_len_m": 18.3,        # 60 ft total piping
+        "num_bends": 4,            # 4 pipe bends
+        "layout_type": "3-story tower (2,300 sqft total) with vertical gravity cascade",
+        "social_impact": "Creates dozens of stable jobs in a low-income community.",
+        "environmental_impact": "Minimal land disturbance; urban infrastructure revitalization.",
     },
 }
 
@@ -114,7 +138,6 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     """
     Simulates UAE mass balance through the 4 sequential unit operations.
     """
-    # Step 0: Raw Slurry Inputs (20% wt sugar, 20% wt fiber, 60% wt water)
     slurry_vol_m3_day = slurry_vol_gal_day * GALLONS_TO_M3
     rho_slurry = calculate_density(0.20, 0.0, 0.20, 0.60)
     slurry_mass_kg_day = slurry_vol_m3_day * rho_slurry
@@ -132,7 +155,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_water_ferm_out = m_water_in
     m_fiber_ferm_out = m_fiber_in
 
-    # Step 2: Filter (removes fiber)
+    # Step 2: Filter
     eta_filt = MATERIAL_REMOVAL_CATALOG[filt_line]["eta"]
     m_fiber_filt_out = m_fiber_ferm_out * (1.0 - eta_filt)
     m_fiber_filt_waste = m_fiber_ferm_out * eta_filt
@@ -140,7 +163,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_water_filt_out = m_water_ferm_out
     m_ethanol_filt_out = m_ethanol_ferm_out
 
-    # Step 3: Distiller (concentrates ethanol)
+    # Step 3: Distiller
     eta_dist = DISTILLER_CATALOG[dist_line]["eta"]
     m_ethanol_dist_out = m_ethanol_filt_out
 
@@ -158,7 +181,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_sugar_dist_waste = m_sugar_filt_out - m_sugar_dist_out
     m_fiber_dist_waste = m_fiber_filt_out - m_fiber_dist_out
 
-    # Step 4: Dehydrator (removes excess water)
+    # Step 4: Dehydrator
     eta_dehy = MATERIAL_REMOVAL_CATALOG[dehy_line]["eta"]
     m_water_dehy_out = m_water_dist_out * (1.0 - eta_dehy)
     m_water_dehy_waste = m_water_dist_out * eta_dehy
@@ -166,7 +189,6 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_sugar_dehy_out = m_sugar_dist_out
     m_fiber_dehy_out = m_fiber_dist_out
 
-    # Final Output Summary
     m_total_final = m_ethanol_dehy_out + m_water_dehy_out + m_sugar_dehy_out + m_fiber_dehy_out
     purity_ethanol = (m_ethanol_dehy_out / m_total_final) if m_total_final > 0 else 0.0
 
@@ -174,7 +196,6 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     vol_final_m3_day = m_total_final / rho_final
     vol_final_gal_day = vol_final_m3_day * M3_TO_GALLONS
 
-    # Volumetric flow rates into each unit (m^3/s)
     q_in_slurry_m3s = slurry_vol_m3_day / SECONDS_PER_DAY
 
     rho_ferm_out = calculate_density(m_sugar_ferm_out, m_ethanol_ferm_out, m_fiber_ferm_out, m_water_ferm_out)
@@ -207,35 +228,36 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
 
 
 def run_full_model(
-    slurry_vol_gal_day=690000.0,
+    slurry_vol_gal_day=689575.0,
     site_name="Site 3",
     ferm_line="World-class",
     filt_line="Premium",
     dist_line="World-class",
     dehy_line="World-class",
-    pump_line="Standard",
-    pump_eff=0.86,
-    pump_lift_m=18.3,  # 60 ft vertical elevation (top floor fermenter)
+    pump_line="High-Grade",
     pipe_tier="Nice",
     pipe_d=0.10,
-    pipe_len_m=18.3,
-    num_bends=4,
-    bend_xi=0.3,  # 90 degree bend
+    bend_xi=0.3,
     num_valves=8,
     valve_k=800.0,
+    price_per_gal_ethanol=2.50,   # Wholesale ethanol selling price ($/gal)
+    elec_cost_per_kwh=0.10,       # Electricity cost ($/kWh)
 ):
     """
-    Executes complete system modeling (Mass Balance, Hydraulics, Electrical Energy, EROI, and Capital Cost).
+    Executes complete system modeling (Mass Balance, Site Hydraulics, Energy/EROI, Capital Cost & Financial ROI).
     """
-    # 1. Mass Balance Calculation
+    # 1. Mass Balance
     mb = run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_line)
 
-    # 2. Hydraulic Loss Calculation
+    # 2. Site Hydraulics & Energy Loss
+    site_info = SITE_CATALOG[site_name]
+    pump_lift_m = site_info["pump_lift_m"]
+    pipe_len_m = site_info["pipe_len_m"]
+    num_bends = site_info["num_bends"]
+
     q_m3s = mb["q_in_slurry_m3s"]
-    rho_slurry = calculate_density(0.20, 0.0, 0.20, 0.60)
     area_pipe = math.pi * (pipe_d / 2.0) ** 2
     v_pipe = q_m3s / area_pipe
-
     f_friction = PIPE_CATALOG_D010[pipe_tier]["f"]
 
     # Head losses (m)
@@ -243,6 +265,8 @@ def run_full_model(
     h_bends = num_bends * (bend_xi * (v_pipe**2 / (2.0 * G)))
     h_valves = num_valves * (valve_k * (v_pipe**2 / (2.0 * G)))
     h_total = pump_lift_m + h_dw + h_bends + h_valves
+
+    pump_eff = PUMP_CATALOG[pump_line]["eff"]
 
     # Mechanical Work done by pump per day (Joules)
     e_pump_work_j_day = mb["slurry_mass_kg_day"] * G * h_total
@@ -269,30 +293,47 @@ def run_full_model(
     # Energy Output (MJ/day)
     e_out_mj_day = mb["vol_final_gal_day"] * ENERGY_DENSITY_E100_MJ_PER_GAL
 
-    # EROI
+    # Energy Return on Investment (EROI)
     eroi = e_out_mj_day / e_total_elec_mj_day if e_total_elec_mj_day > 0 else 0.0
 
-    # 3. Capital Cost Calculation ($)
-    site_info = SITE_CATALOG[site_name]
-    cost_site = site_info["purchase_cost"] * (1.0 + site_info["tax_rate"]) + site_info["remediation_cost"]
+    # 3. Capital Costs ($)
+    cost_site = (
+        site_info["purchase_cost"] * (1.0 + site_info["tax_rate"])
+        + site_info["remediation_cost"]
+        + site_info["infra_add_on_cost"]
+    )
 
     cost_ferm = FERMENTER_CATALOG[ferm_line]["cost_per_m3s"] * mb["q_in_slurry_m3s"]
     cost_filt = MATERIAL_REMOVAL_CATALOG[filt_line]["cost_per_m3s"] * mb["q_ferm_out_m3s"]
     cost_dist = DISTILLER_CATALOG[dist_line]["cost_per_m3s"] * mb["q_filt_out_m3s"]
     cost_dehy = MATERIAL_REMOVAL_CATALOG[dehy_line]["cost_per_m3s"] * mb["q_dist_out_m3s"]
+    cost_pump = PUMP_CATALOG[pump_line]["cost_per_m3s"] * mb["q_in_slurry_m3s"]
 
     cost_pipe = PIPE_CATALOG_D010[pipe_tier]["cost_per_m"] * pipe_len_m
-    cost_bends = num_bends * 128.0  # 90 degree bend for 0.10m pipe
-    cost_valves = num_valves * 100.0  # Salvage valve for K=800
-
-    cost_pump = 460000.0 * mb["q_in_slurry_m3s"]
+    cost_bends = num_bends * 128.0
+    cost_valves = num_valves * 100.0
 
     capital_cost_total = (
         cost_site + cost_ferm + cost_filt + cost_dist + cost_dehy + cost_pipe + cost_bends + cost_valves + cost_pump
     )
 
+    # 4. Financial ROI & Operational Economics
+    daily_revenue = mb["vol_final_gal_day"] * price_per_gal_ethanol
+    annual_revenue = daily_revenue * 365.0
+
+    daily_opex_elec = e_total_elec_kwh_day * elec_cost_per_kwh
+    annual_opex_elec = daily_opex_elec * 365.0
+
+    # Assume maintenance/labor/overhead is ~15% of annual revenue
+    annual_other_opex = 0.15 * annual_revenue
+    annual_net_profit = annual_revenue - annual_opex_elec - annual_other_opex
+
+    financial_roi_percent = (annual_net_profit / capital_cost_total * 100.0) if capital_cost_total > 0 else 0.0
+    payback_years = (capital_cost_total / annual_net_profit) if annual_net_profit > 0 else float("inf")
+
     return {
         "site_name": site_name,
+        "site_info": site_info,
         "slurry_input_gal_day": slurry_vol_gal_day,
         "ethanol_output_gal_day": mb["vol_final_gal_day"],
         "ethanol_purity_percent": mb["purity_ethanol"] * 100.0,
@@ -307,14 +348,20 @@ def run_full_model(
         "cost_site": cost_site,
         "cost_equipment": cost_ferm + cost_filt + cost_dist + cost_dehy + cost_pump,
         "cost_piping_fittings": cost_pipe + cost_bends + cost_valves,
+        "daily_revenue": daily_revenue,
+        "annual_revenue": annual_revenue,
+        "daily_opex_elec": daily_opex_elec,
+        "annual_opex_elec": annual_opex_elec,
+        "annual_net_profit": annual_net_profit,
+        "financial_roi_percent": financial_roi_percent,
+        "payback_years": payback_years,
         "mass_balance": mb,
     }
 
 
 def find_target_slurry_volume(target_ethanol_gal_day=100000.0, **model_kwargs):
     """
-    Uses linear scaling to find the exact required corn slurry input volume (gal/day)
-    to achieve the target ethanol output volume (e.g. 100,000 gal/day).
+    Solves for the required corn slurry input volume (gal/day) to achieve the target ethanol output.
     """
     base_results = run_full_model(slurry_vol_gal_day=500000.0, **model_kwargs)
     base_out = base_results["ethanol_output_gal_day"]
@@ -324,63 +371,176 @@ def find_target_slurry_volume(target_ethanol_gal_day=100000.0, **model_kwargs):
 
 
 def print_summary_report(results):
-    """Prints a formatted execution summary of the model results."""
-    print("=" * 70)
-    print("      ENGR 16100 PROJECT 2: ETHANOL PRODUCTION MODEL RESULTS")
-    print("=" * 70)
-    print(f"Selected Facility Site     : {results['site_name']}")
+    """Prints a detailed formatted execution summary of the model results."""
+    print("\n" + "=" * 78)
+    print("      ENGR 16100 PROJECT 2: ETHANOL PRODUCTION MODEL RESULTS (v2)")
+    print("=" * 78)
+    print(f"Selected Facility Site     : {results['site_name']} ({results['site_info']['layout_type']})")
     print(f"Corn Slurry Input Volume  : {results['slurry_input_gal_day']:,.0f} gal/day")
     print(f"Ethanol Output Volume     : {results['ethanol_output_gal_day']:,.2f} gal/day")
-    print(f"Ethanol Purity             : {results['ethanol_purity_percent']:.2f}% (Requirement: >= 98.0%)")
-    print("-" * 70)
-    print("HYDRAULIC & FLUID METRICS:")
+    print(f"Ethanol Exit Purity        : {results['ethanol_purity_percent']:.2f}% (Requirement: >= 98.0%)")
+    print("-" * 78)
+    print("SITE & HYDRAULIC METRICS:")
+    print(f"  Pumping Height Lift      : {results['site_info']['pump_lift_m']:.2f} m ({results['site_info']['pump_lift_m']*3.28084:.0f} ft)")
+    print(f"  Pipe Length & Bends      : {results['site_info']['pipe_len_m']:.1f} m, {results['site_info']['num_bends']} bends")
     print(f"  Fluid Velocity in Pipe   : {results['fluid_velocity_m_s']:.2f} m/s")
     print(f"  Friction Head Loss (H_DW): {results['head_loss_dw_m']:.2f} m")
     print(f"  Total Effective Head     : {results['head_loss_total_m']:.2f} m")
-    print("-" * 70)
+    print("-" * 78)
     print("ENERGY & EROI METRICS:")
     print(f"  Total Electrical In      : {results['total_elec_kwh_day']:,.2f} kWh/day ({results['total_elec_mj_day']:,.2f} MJ/day)")
     print(f"  Usable Ethanol Energy Out: {results['usable_energy_out_mj_day']:,.2f} MJ/day")
     print(f"  Energy ROI (EROI)        : {results['eroi']:.2f}x")
-    print("-" * 70)
-    print("FINANCIAL & CAPITAL COSTS:")
+    print("-" * 78)
+    print("FINANCIAL & CAPITAL COSTS (CapEx):")
     print(f"  Site Acquisition & Tax   : ${results['cost_site']:,.2f}")
     print(f"  Equipment Capital Cost   : ${results['cost_equipment']:,.2f}")
     print(f"  Piping & Fittings Cost   : ${results['cost_piping_fittings']:,.2f}")
     print(f"  TOTAL CAPITAL COST       : ${results['capital_cost_total']:,.2f}")
-    print("=" * 70)
+    print("-" * 78)
+    print("FINANCIAL ROI & OPERATIONAL ECONOMICS:")
+    print(f"  Annual Revenue ($2.50/gal): ${results['annual_revenue']:,.2f}/yr")
+    print(f"  Annual Elec OpEx ($0.10/kwh): ${results['annual_opex_elec']:,.2f}/yr")
+    print(f"  Estimated Annual Net Profit : ${results['annual_net_profit']:,.2f}/yr")
+    print(f"  Simple Financial ROI (%)    : {results['financial_roi_percent']:.2f}% per year")
+    print(f"  Capital Payback Period      : {results['payback_years']:.2f} years")
+    print("-" * 78)
+    print("COMMUNITY & ENVIRONMENTAL IMPACTS:")
+    print(f"  Social Impact            : {results['site_info']['social_impact']}")
+    print(f"  Environmental Impact     : {results['site_info']['environmental_impact']}")
+    print("=" * 78 + "\n")
+
+
+def compare_all_sites(target_ethanol_gal_day=100000.0):
+    """Generates a comparative side-by-side summary table of Site 1, Site 2, and Site 3."""
+    print("\n" + "#" * 84)
+    print("          COMPARATIVE ANALYSIS OF FACILITY SITES (Target: 100,000 gal/day E100)")
+    print("#" * 84)
+    header = f"{'Metric / Criteria':<28} | {'Site 1':<16} | {'Site 2':<16} | {'Site 3 (Recommended)':<18}"
+    print(header)
+    print("-" * 84)
+
+    res1 = find_target_slurry_volume(target_ethanol_gal_day, site_name="Site 1")
+    res2 = find_target_slurry_volume(target_ethanol_gal_day, site_name="Site 2")
+    res3 = find_target_slurry_volume(target_ethanol_gal_day, site_name="Site 3")
+
+    s1_cost = f"${res1['cost_site']:,.0f}"
+    s2_cost = f"${res2['cost_site']:,.0f}"
+    s3_cost = f"${res3['cost_site']:,.0f}"
+    print(f"{'Site Acquisition Cost':<28} | {s1_cost:<16} | {s2_cost:<16} | {s3_cost:<18}")
+
+    print(f"{'Layout / Architecture':<28} | {'2-Story Bldgs':<16} | {'L-Warehouse':<16} | {'3-Story Tower':<18}")
+
+    s1_lift = f"{res1['site_info']['pump_lift_m']:.1f} m"
+    s2_lift = f"{res2['site_info']['pump_lift_m']:.1f} m"
+    s3_lift = f"{res3['site_info']['pump_lift_m']:.1f} m"
+    print(f"{'Pumping Lift Height':<28} | {s1_lift:<16} | {s2_lift:<16} | {s3_lift:<18}")
+
+    s1_head = f"{res1['head_loss_total_m']:.2f} m"
+    s2_head = f"{res2['head_loss_total_m']:.2f} m"
+    s3_head = f"{res3['head_loss_total_m']:.2f} m"
+    print(f"{'Total Effective Head':<28} | {s1_head:<16} | {s2_head:<16} | {s3_head:<18}")
+
+    s1_elec = f"{res1['total_elec_kwh_day']:,.0f} kWh"
+    s2_elec = f"{res2['total_elec_kwh_day']:,.0f} kWh"
+    s3_elec = f"{res3['total_elec_kwh_day']:,.0f} kWh"
+    print(f"{'Daily Elec Consumption':<28} | {s1_elec:<16} | {s2_elec:<16} | {s3_elec:<18}")
+
+    s1_eroi = f"{res1['eroi']:.2f}x"
+    s2_eroi = f"{res2['eroi']:.2f}x"
+    s3_eroi = f"{res3['eroi']:.2f}x"
+    print(f"{'Energy ROI (EROI)':<28} | {s1_eroi:<16} | {s2_eroi:<16} | {s3_eroi:<18}")
+
+    s1_cap = f"${res1['capital_cost_total']:,.0f}"
+    s2_cap = f"${res2['capital_cost_total']:,.0f}"
+    s3_cap = f"${res3['capital_cost_total']:,.0f}"
+    print(f"{'Total Capital Cost (CapEx)':<28} | {s1_cap:<16} | {s2_cap:<16} | {s3_cap:<18}")
+
+    s1_froi = f"{res1['financial_roi_percent']:.1f}%"
+    s2_froi = f"{res2['financial_roi_percent']:.1f}%"
+    s3_froi = f"{res3['financial_roi_percent']:.1f}%"
+    print(f"{'Financial ROI (%/yr)':<28} | {s1_froi:<16} | {s2_froi:<16} | {s3_froi:<18}")
+
+    s1_pay = f"{res1['payback_years']:.2f} yrs"
+    s2_pay = f"{res2['payback_years']:.2f} yrs"
+    s3_pay = f"{res3['payback_years']:.2f} yrs"
+    print(f"{'Capital Payback Period':<28} | {s1_pay:<16} | {s2_pay:<16} | {s3_pay:<18}")
+
+    print("#" * 84 + "\n")
+
+
+def interactive_user_input():
+    """Interactive CLI interface allowing custom prompt selection."""
+    print("\n" + "=" * 60)
+    print("   ETHANOL PRODUCTION MODEL: INTERACTIVE DESIGN SESSION")
+    print("=" * 60)
+
+    # 1. Target Volume
+    try:
+        vol_str = input("Enter target ethanol output (gal/day) [Default: 100000]: ").strip()
+        target_vol = float(vol_str) if vol_str else 100000.0
+    except ValueError:
+        target_vol = 100000.0
+
+    # 2. Site Selection
+    print("\nSelect Facility Site:")
+    print("  1) Site 1 (Two 2-story buildings, $1.5M)")
+    print("  2) Site 2 (L-shaped warehouse, $1.3M + $150k road)")
+    print("  3) Site 3 (3-story tower, $1.6M + 10% tax + $12k mold) [Recommended]")
+    site_choice = input("Choice (1, 2, or 3) [Default: 3]: ").strip()
+    site_map = {"1": "Site 1", "2": "Site 2", "3": "Site 3"}
+    site_name = site_map.get(site_choice, "Site 3")
+
+    # 3. Fermenter Tier
+    print("\nSelect Fermenter Line:")
+    print("  1) Scrap (50% conv)  2) Average (75%)  3) Premium (90%)  4) World-class (95%)")
+    f_choice = input("Choice (1-4) [Default: 4]: ").strip()
+    tier_map = {"1": "Scrap", "2": "Average", "3": "Premium", "4": "World-class"}
+    ferm_line = tier_map.get(f_choice, "World-class")
+
+    # 4. Distiller Tier
+    print("\nSelect Distiller Line:")
+    print("  1) Scrap (81% purity) 2) Average (90%) 3) Premium (91.5%) 4) World-class (98%)")
+    d_choice = input("Choice (1-4) [Default: 4]: ").strip()
+    dist_line = tier_map.get(d_choice, "World-class")
+
+    # 5. Filter & Dehydrator Tier
+    print("\nSelect Dehydrator Line:")
+    print("  1) Scrap (50%) 2) Average (75%) 3) Premium (90%) 4) World-class (98%)")
+    dehy_choice = input("Choice (1-4) [Default: 4]: ").strip()
+    dehy_line = tier_map.get(dehy_choice, "World-class")
+
+    print("\nRunning simulation with your custom parameters...")
+    results = find_target_slurry_volume(
+        target_ethanol_gal_day=target_vol,
+        site_name=site_name,
+        ferm_line=ferm_line,
+        dist_line=dist_line,
+        dehy_line=dehy_line,
+    )
+    print_summary_report(results)
 
 
 if __name__ == "__main__":
-    # Test Case 1: Model Validation Benchmark Case (from Model Validation Document)
-    print("RUNNING MODEL VALIDATION BENCHMARK CASE:")
-    val_results = run_full_model(
-        slurry_vol_gal_day=835200.0,
-        site_name="Site 3",
-        ferm_line="Scrap",        # 50%
-        filt_line="Scrap",        # 50%
-        dist_line="Scrap",        # 81%
-        dehy_line="Scrap",        # 50%
-        pump_line="Cheap",        # 80%
-        pump_eff=0.80,
-    )
-    print(f"Validation Ethanol Output : {val_results['ethanol_output_gal_day']/1000:.2f}k gal/day (Target Benchmark: ~68.70k gal/day)")
-    print(f"Validation Purity         : {val_results['ethanol_purity_percent']:.1f}% (Target Benchmark: 87%)")
-    print(f"Validation EROI           : {val_results['eroi']:.2f} (Target Benchmark: ~5.55)")
-    print(f"Validation Capital Cost   : ${val_results['capital_cost_total']:,.0f} (Target Benchmark: ~$1,867,000)")
-    print("\n" + "#"*70 + "\n")
+    if sys.stdin.isatty() and "--batch" not in sys.argv:
+        interactive_user_input()
+    else:
+        print("RUNNING MODEL VALIDATION BENCHMARK CASE:")
+        val_results = run_full_model(
+            slurry_vol_gal_day=835200.0,
+            site_name="Site 3",
+            ferm_line="Scrap",
+            filt_line="Scrap",
+            dist_line="Scrap",
+            dehy_line="Scrap",
+            pump_line="Cheap",
+        )
+        print(f"Validation Ethanol Output : {val_results['ethanol_output_gal_day']/1000:.2f}k gal/day (Target Benchmark: ~68.70k gal/day)")
+        print(f"Validation Purity         : {val_results['ethanol_purity_percent']:.1f}% (Target Benchmark: 87%)")
+        print(f"Validation EROI           : {val_results['eroi']:.2f} (Target Benchmark: ~5.55)")
+        print(f"Validation Capital Cost   : ${val_results['capital_cost_total']:,.0f} (Target Benchmark: ~$1,867,000)")
 
-    # Test Case 2: Optimal Recommended Configuration (Exact 100,000 gal/day @ >=98% Purity)
-    print("RUNNING RECOMMENDED OPTIMAL DESIGN CONFIGURATION (Target: 100,000 gal/day E100 @ >=98% Purity):")
-    opt_results = find_target_slurry_volume(
-        target_ethanol_gal_day=100000.0,
-        site_name="Site 3",
-        ferm_line="World-class",      # 95% conversion
-        filt_line="Premium",          # 90% filtration
-        dist_line="World-class",      # 98% distillation purity
-        dehy_line="World-class",      # 98% water removal
-        pump_line="High-Grade",       # 89% pump efficiency
-        pump_eff=0.89,
-    )
-    print_summary_report(opt_results)
+        compare_all_sites(target_ethanol_gal_day=100000.0)
 
+        opt_results = find_target_slurry_volume(target_ethanol_gal_day=100000.0, site_name="Site 3")
+        print_summary_report(opt_results)

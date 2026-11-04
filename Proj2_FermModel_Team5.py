@@ -1,22 +1,15 @@
 """
-Proj2_FermModel_TeamXX_v2.py
+Proj2_FermModel_TeamXX_v3.py
 
-ENGR 16100 - Project 2: Ethanol Production Facility Computational Model (Version 2)
+ENGR 16100 - Project 2: Ethanol Production Facility Computational Model (Version 3)
 Mass & Energy Balance, Fluid Mechanics, Site Selection, Capital Cost, EROI, and Financial ROI Calculator.
 
-This updated Python model incorporates:
-1. Interactive User Input handling (CLI prompts for site selection, target production volume, 
-   equipment tiers, and economic parameters with clean batch fallback).
-2. Site-Specific Engineering Effects on Energy Return on Investment (EROI):
-   - Site 1: Two 2-story buildings (40 ft elevation lift, 30.5 m pipe length, 6 bends).
-   - Site 2: L-shaped warehouse (25 ft ledge lift, 36.6 m pipe length, 6 bends, $150k road cost).
-   - Site 3: 3-story tower (Gravity-assisted layout, 50 ft lift to fermenter, 18.3 m pipe length, 
-     4 bends, 10% real estate tax, $12k mold remediation).
-3. Comprehensive Financial ROI & Payback Modeling:
-   - Annual Revenue based on wholesale E100 price.
-   - Daily & Annual Electrical Operating Expenses (OpEx).
-   - Total Capital Cost (CapEx) breakdown (Site + Equipment + Piping + Fittings).
-   - Simple Annual Financial ROI (%) and Capital Payback Period (Years).
+This updated version explicitly incorporates:
+1. Complete 4-Unit Operation Modeling: Fermenter, Filter, Distiller, and Dehydrator.
+2. Interactive User Input (CLI prompts for Target Volume, Site Selection, Fermenter Line, 
+   Filter Line, Distiller Line, Dehydrator Line, Pump Tier, and Economic Factors).
+3. Detailed Equipment-by-Equipment Capital Cost & Efficiency Breakdown.
+4. Site-Specific Engineering Effects on EROI and Financial Payback.
 """
 
 import math
@@ -136,7 +129,8 @@ def calculate_density(m_sugar, m_ethanol, m_fiber, m_water):
 
 def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_line):
     """
-    Simulates UAE mass balance through the 4 sequential unit operations.
+    Simulates UAE mass balance through all 4 sequential unit operations:
+    Fermenter -> Filter -> Distiller -> Dehydrator.
     """
     slurry_vol_m3_day = slurry_vol_gal_day * GALLONS_TO_M3
     rho_slurry = calculate_density(0.20, 0.0, 0.20, 0.60)
@@ -146,7 +140,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_fiber_in = 0.20 * slurry_mass_kg_day
     m_water_in = 0.60 * slurry_mass_kg_day
 
-    # Step 1: Fermenter
+    # Step 1: Fermenter (converts sugar to ethanol and CO2)
     eta_ferm = FERMENTER_CATALOG[ferm_line]["eta"]
     m_sugar_converted = m_sugar_in * eta_ferm
     m_ethanol_ferm_out = 0.51 * m_sugar_converted
@@ -155,7 +149,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_water_ferm_out = m_water_in
     m_fiber_ferm_out = m_fiber_in
 
-    # Step 2: Filter
+    # Step 2: Filter (removes insoluble corn fiber)
     eta_filt = MATERIAL_REMOVAL_CATALOG[filt_line]["eta"]
     m_fiber_filt_out = m_fiber_ferm_out * (1.0 - eta_filt)
     m_fiber_filt_waste = m_fiber_ferm_out * eta_filt
@@ -163,7 +157,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_water_filt_out = m_water_ferm_out
     m_ethanol_filt_out = m_ethanol_ferm_out
 
-    # Step 3: Distiller
+    # Step 3: Distiller (concentrates ethanol)
     eta_dist = DISTILLER_CATALOG[dist_line]["eta"]
     m_ethanol_dist_out = m_ethanol_filt_out
 
@@ -181,7 +175,7 @@ def run_mass_balance(slurry_vol_gal_day, ferm_line, filt_line, dist_line, dehy_l
     m_sugar_dist_waste = m_sugar_filt_out - m_sugar_dist_out
     m_fiber_dist_waste = m_fiber_filt_out - m_fiber_dist_out
 
-    # Step 4: Dehydrator
+    # Step 4: Dehydrator (removes excess water)
     eta_dehy = MATERIAL_REMOVAL_CATALOG[dehy_line]["eta"]
     m_water_dehy_out = m_water_dist_out * (1.0 - eta_dehy)
     m_water_dehy_waste = m_water_dist_out * eta_dehy
@@ -334,6 +328,11 @@ def run_full_model(
     return {
         "site_name": site_name,
         "site_info": site_info,
+        "ferm_line": ferm_line,
+        "filt_line": filt_line,
+        "dist_line": dist_line,
+        "dehy_line": dehy_line,
+        "pump_line": pump_line,
         "slurry_input_gal_day": slurry_vol_gal_day,
         "ethanol_output_gal_day": mb["vol_final_gal_day"],
         "ethanol_purity_percent": mb["purity_ethanol"] * 100.0,
@@ -346,6 +345,11 @@ def run_full_model(
         "eroi": eroi,
         "capital_cost_total": capital_cost_total,
         "cost_site": cost_site,
+        "cost_ferm": cost_ferm,
+        "cost_filt": cost_filt,
+        "cost_dist": cost_dist,
+        "cost_dehy": cost_dehy,
+        "cost_pump": cost_pump,
         "cost_equipment": cost_ferm + cost_filt + cost_dist + cost_dehy + cost_pump,
         "cost_piping_fittings": cost_pipe + cost_bends + cost_valves,
         "daily_revenue": daily_revenue,
@@ -371,14 +375,23 @@ def find_target_slurry_volume(target_ethanol_gal_day=100000.0, **model_kwargs):
 
 
 def print_summary_report(results):
-    """Prints a detailed formatted execution summary of the model results."""
+    """Prints a detailed formatted execution summary of the model results including all 4 units."""
+    mb = results["mass_balance"]
     print("\n" + "=" * 78)
-    print("      ENGR 16100 PROJECT 2: ETHANOL PRODUCTION MODEL RESULTS (v2)")
+    print("      ENGR 16100 PROJECT 2: ETHANOL PRODUCTION MODEL RESULTS (v3)")
     print("=" * 78)
     print(f"Selected Facility Site     : {results['site_name']} ({results['site_info']['layout_type']})")
     print(f"Corn Slurry Input Volume  : {results['slurry_input_gal_day']:,.0f} gal/day")
     print(f"Ethanol Output Volume     : {results['ethanol_output_gal_day']:,.2f} gal/day")
     print(f"Ethanol Exit Purity        : {results['ethanol_purity_percent']:.2f}% (Requirement: >= 98.0%)")
+    print("-" * 78)
+    print("UNIT OPERATIONS & EFFICIENCIES:")
+    print(f"  1. Fermenter ({results['ferm_line']:<11}): {FERMENTER_CATALOG[results['ferm_line']]['eta']*100:.1f}% sugar conversion -> ${results['cost_ferm']:,.2f}")
+    print(f"  2. Filter    ({results['filt_line']:<11}): {MATERIAL_REMOVAL_CATALOG[results['filt_line']]['eta']*100:.1f}% fiber removal    -> ${results['cost_filt']:,.2f}")
+    print(f"     [Filter Fiber Removal: {mb['m_fiber_filt_waste']:,.1f} kg/day of dry waste fiber]")
+    print(f"  3. Distiller ({results['dist_line']:<11}): {DISTILLER_CATALOG[results['dist_line']]['eta']*100:.1f}% alcohol exit purity -> ${results['cost_dist']:,.2f}")
+    print(f"  4. Dehydrator({results['dehy_line']:<11}): {MATERIAL_REMOVAL_CATALOG[results['dehy_line']]['eta']*100:.1f}% water removal     -> ${results['cost_dehy']:,.2f}")
+    print(f"  5. Pump      ({results['pump_line']:<11}): {PUMP_CATALOG[results['pump_line']]['eff']*100:.1f}% mechanical eff    -> ${results['cost_pump']:,.2f}")
     print("-" * 78)
     print("SITE & HYDRAULIC METRICS:")
     print(f"  Pumping Height Lift      : {results['site_info']['pump_lift_m']:.2f} m ({results['site_info']['pump_lift_m']*3.28084:.0f} ft)")
@@ -394,7 +407,7 @@ def print_summary_report(results):
     print("-" * 78)
     print("FINANCIAL & CAPITAL COSTS (CapEx):")
     print(f"  Site Acquisition & Tax   : ${results['cost_site']:,.2f}")
-    print(f"  Equipment Capital Cost   : ${results['cost_equipment']:,.2f}")
+    print(f"  Equipment Capital Cost   : ${results['cost_equipment']:,.2f} (Fermenter + Filter + Distiller + Dehydrator + Pump)")
     print(f"  Piping & Fittings Cost   : ${results['cost_piping_fittings']:,.2f}")
     print(f"  TOTAL CAPITAL COST       : ${results['capital_cost_total']:,.2f}")
     print("-" * 78)
@@ -470,7 +483,7 @@ def compare_all_sites(target_ethanol_gal_day=100000.0):
 
 
 def interactive_user_input():
-    """Interactive CLI interface allowing custom prompt selection."""
+    """Interactive CLI interface allowing complete design selection for all 4 units."""
     print("\n" + "=" * 60)
     print("   ETHANOL PRODUCTION MODEL: INTERACTIVE DESIGN SESSION")
     print("=" * 60)
@@ -491,22 +504,29 @@ def interactive_user_input():
     site_map = {"1": "Site 1", "2": "Site 2", "3": "Site 3"}
     site_name = site_map.get(site_choice, "Site 3")
 
+    tier_map = {"1": "Scrap", "2": "Average", "3": "Premium", "4": "World-class"}
+
     # 3. Fermenter Tier
     print("\nSelect Fermenter Line:")
     print("  1) Scrap (50% conv)  2) Average (75%)  3) Premium (90%)  4) World-class (95%)")
     f_choice = input("Choice (1-4) [Default: 4]: ").strip()
-    tier_map = {"1": "Scrap", "2": "Average", "3": "Premium", "4": "World-class"}
     ferm_line = tier_map.get(f_choice, "World-class")
 
-    # 4. Distiller Tier
+    # 4. Filter Tier (EXPLICITLY ADDED)
+    print("\nSelect Filter Line (Fiber Removal):")
+    print("  1) Scrap (50% removal) 2) Average (75%) 3) Premium (90%) [Default] 4) World-class (98%)")
+    filt_choice = input("Choice (1-4) [Default: 3]: ").strip()
+    filt_line = tier_map.get(filt_choice, "Premium")
+
+    # 5. Distiller Tier
     print("\nSelect Distiller Line:")
     print("  1) Scrap (81% purity) 2) Average (90%) 3) Premium (91.5%) 4) World-class (98%)")
     d_choice = input("Choice (1-4) [Default: 4]: ").strip()
     dist_line = tier_map.get(d_choice, "World-class")
 
-    # 5. Filter & Dehydrator Tier
-    print("\nSelect Dehydrator Line:")
-    print("  1) Scrap (50%) 2) Average (75%) 3) Premium (90%) 4) World-class (98%)")
+    # 6. Dehydrator Tier
+    print("\nSelect Dehydrator Line (Water Removal):")
+    print("  1) Scrap (50%) 2) Average (75%) 3) Premium (90%) 4) World-class (98%) [Default]")
     dehy_choice = input("Choice (1-4) [Default: 4]: ").strip()
     dehy_line = tier_map.get(dehy_choice, "World-class")
 
@@ -515,6 +535,7 @@ def interactive_user_input():
         target_ethanol_gal_day=target_vol,
         site_name=site_name,
         ferm_line=ferm_line,
+        filt_line=filt_line,
         dist_line=dist_line,
         dehy_line=dehy_line,
     )
